@@ -1,0 +1,48 @@
+{
+  "$schema": "..\\changeset.schema.json",
+  "version": 1,
+  "controller": "robot2",
+  "expectedController": {
+    "name": "EXAMPLE_CONTROLLER",
+    "systemId": "11111111-2222-3333-4444-555555555555",
+    "robotWare": "6.13.0164"
+  },
+  "safety": {
+    "requireRapidStopped": true,
+    "allowedControllerStates": ["guardstop", "motoroff"]
+  },
+  "operations": [
+    {
+      "kind": "cfg_set",
+      "domain": "sio",
+      "type": "IP_SETTING",
+      "instance": "PROFINET Network",
+      "fields": {
+        "Address": "192.0.2.100",
+        "SubnetMask": "255.255.255.0",
+        "Interface": "LAN3"
+      }
+    },
+    {
+      "kind": "cfg_set",
+      "domain": "eio",
+      "type": "INDUSTRIAL_NETWORK",
+      "instance": "PROFINET",
+      "fields": {
+        "StationName": "robot2",
+        "Address": "192.0.2.100"
+      }
+    },
+    {
+      "kind": "rapid_module_put",
+      "task": "T_ROB1",
+      "module": "MainModule",
+      "localPath": "C:\\ABB_MCP_DATA\\abb-jobs\\MainModule.mod"
+    }
+  ],
+  "restart": {
+    "required": true,
+    "mode": "restart",
+    "timeoutSeconds": 180
+  }
+}

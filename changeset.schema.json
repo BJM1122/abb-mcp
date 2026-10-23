@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex/abb-mcp/changeset.schema.json",
+  "title": "ABB batch changeset",
+  "type": "object",
+  "required": ["version", "controller", "expectedController", "operations"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "controller": { "type": "string", "minLength": 1 },
+    "expectedController": {
+      "type": "object",
+      "required": ["name", "systemId", "robotWare"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "systemId": { "type": "string", "minLength": 1 },
+        "robotWare": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "safety": {
+      "type": "object",
+      "required": ["requireRapidStopped", "allowedControllerStates"],
+      "properties": {
+        "requireRapidStopped": { "const": true },
+        "allowedControllerStates": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["guardstop", "motoroff"] }
+        }
+      },
+      "additionalProperties": false
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "restart": {
+      "type": "object",
+      "required": ["required", "mode", "timeoutSeconds"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "mode": { "const": "restart" },
+        "timeoutSeconds": { "type": "integer", "minimum": 30, "maximum": 600 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "domain": { "enum": ["eio", "sio", "sys", "proc"] },
+    "stringFields": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "domain", "type", "instance", "fields"],
+          "properties": {
+            "kind": { "const": "cfg_set" },
+            "domain": { "$ref": "#/$defs/domain" },
+            "type": { "type": "string" },
+            "instance": { "type": "string" },
+            "fields": { "$ref": "#/$defs/stringFields" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "domain", "type", "instance", "fields"],
+          "properties": {
+            "kind": { "const": "cfg_upsert" },
+            "domain": { "$ref": "#/$defs/domain" },
+            "type": { "type": "string" },
+            "instance": { "type": "string" },
+            "fields": { "$ref": "#/$defs/stringFields" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "domain", "type", "instanceKey", "ifPresent"],
+          "properties": {
+            "kind": { "const": "cfg_delete" },
+            "domain": { "$ref": "#/$defs/domain" },
+            "type": { "type": "string" },
+            "instanceKey": { "type": "string" },
+            "ifPresent": { "const": true }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "domain", "actionType", "localPath", "verify"],
+          "properties": {
+            "kind": { "const": "cfg_file_load" },
+            "domain": { "$ref": "#/$defs/domain" },
+            "actionType": { "enum": ["add", "add-with-reset"] },
+            "localPath": { "type": "string" },
+            "verify": {
+              "type": "object",
+              "minProperties": 1,
+              "properties": {
+                "cfgInstances": { "type": "array", "items": { "type": "object" } },
+                "configSignals": { "type": "array", "items": { "type": "object" } },
+                "signals": { "type": "array", "items": { "type": "string" } }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "task", "module", "name", "value"],
+          "properties": {
+            "kind": { "const": "rapid_set_init" },
+            "task": { "type": "string" },
+            "module": { "type": "string" },
+            "name": { "type": "string" },
+            "value": { "type": ["string", "number", "boolean"] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "task", "module"],
+          "properties": {
+            "kind": { "enum": ["rapid_module_put", "rapid_module_replace"] },
+            "task": { "type": "string" },
+            "module": { "type": "string" },
+            "localPath": { "type": "string" },
+            "source": { "type": "string", "minLength": 1 }
+          },
+          "oneOf": [{ "required": ["localPath"] }, { "required": ["source"] }],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "task", "module", "ifPresent"],
+          "properties": {
+            "kind": { "const": "rapid_module_delete" },
+            "task": { "type": "string" },
+            "module": { "type": "string" },
+            "ifPresent": { "const": true },
+            "allowSystemModule": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "controller": "mock",
+  "expectedController": {
+    "name": "MOCK-ABB",
+    "systemId": "11111111-2222-3333-4444-555555555555",
+    "robotWare": "6.13.0164"
+  },
+  "safety": {
+    "requireRapidStopped": true,
+    "allowedControllerStates": ["guardstop", "motoroff"]
+  },
+  "operations": [
+    {
+      "kind": "cfg_file_load",
+      "domain": "eio",
+      "actionType": "add-with-reset",
+      "localPath": "C:\\ABB_MCP\\test\\fixtures\\MockEIO.cfg",
+      "verify": {
+        "configSignals": [
+          {
+            "name": "PF_DO30_TEST",
+            "fields": { "SignalType": "DO", "Device": "PN_Internal_Device", "DeviceMap": "0" }
+          },
+          {
+            "name": "PF_DO31_TEST",
+            "fields": { "SignalType": "DO", "Device": "PN_Internal_Device", "DeviceMap": "1" }
+          },
+          {
+            "name": "PF_DO33_TEST",
+            "fields": { "SignalType": "DO", "Device": "PN_Internal_Device", "DeviceMap": "3" }
+          }
+        ]
+      }
+    }
+  ],
+  "restart": {
+    "required": true,
+    "mode": "restart",
+    "timeoutSeconds": 120
+  }
+}

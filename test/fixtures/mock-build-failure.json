@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "controller": "mock",
+  "expectedController": {
+    "name": "MOCK-ABB",
+    "systemId": "11111111-2222-3333-4444-555555555555",
+    "robotWare": "6.13.0164"
+  },
+  "safety": {
+    "requireRapidStopped": true,
+    "allowedControllerStates": ["guardstop", "motoroff"]
+  },
+  "operations": [
+    {
+      "kind": "rapid_module_put",
+      "task": "T_ROB1",
+      "module": "BrokenModule",
+      "localPath": "C:\\ABB_MCP\\test\\fixtures\\MockBroken.mod"
+    }
+  ],
+  "restart": {
+    "required": false,
+    "mode": "restart",
+    "timeoutSeconds": 120
+  }
+}

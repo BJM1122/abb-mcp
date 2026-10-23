@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "allowedLocalRoots": [
+    "C:\\ABB_MCP_DATA"
+  ],
+  "allowedConfigDomains": [
+    "eio",
+    "sio",
+    "sys",
+    "proc"
+  ],
+  "controllers": {
+    "robot2": {
+      "baseUrl": "http://192.0.2.10",
+      "rwsProtocol": "rws1",
+      "expectedName": "EXAMPLE_CONTROLLER",
+      "expectedSystemId": "11111111-2222-3333-4444-555555555555",
+      "expectedRobotWare": "6.13.0164",
+      "username": "Default User",
+      "credentialFile": "%USERPROFILE%\\.abb-mcp\\secrets\\controller.clixml",
+      "defaultTask": "T_ROB1",
+      "ioNetwork": "PROFINET",
+      "ioDevice": "PN_Internal_Device",
+      "requestTimeoutSeconds": 5,
+      "longRequestTimeoutSeconds": 60
+    },
+    "omnicore": {
+      "baseUrl": "https://192.0.2.20",
+      "rwsProtocol": "rws2",
+      "certificateSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expectedName": "EXAMPLE_OMNICORE",
+      "expectedSystemId": "22222222-3333-4444-5555-666666666666",
+      "expectedRobotWare": "7.20.0",
+      "username": "Default User",
+      "credentialFile": "%USERPROFILE%\\.abb-mcp\\secrets\\controller.clixml",
+      "defaultTask": "T_ROB1",
+      "ioNetwork": "PROFINET",
+      "ioDevice": "PN_Internal_Device",
+      "requestTimeoutSeconds": 5,
+      "longRequestTimeoutSeconds": 60
+    }
+  }
+}

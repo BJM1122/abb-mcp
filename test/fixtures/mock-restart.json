@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "controller": "mock",
+  "expectedController": {
+    "name": "MOCK-ABB",
+    "systemId": "11111111-2222-3333-4444-555555555555",
+    "robotWare": "6.13.0164"
+  },
+  "safety": {
+    "requireRapidStopped": true,
+    "allowedControllerStates": ["guardstop", "motoroff"]
+  },
+  "operations": [
+    {
+      "kind": "cfg_set",
+      "domain": "eio",
+      "type": "INDUSTRIAL_NETWORK",
+      "instance": "PROFINET",
+      "fields": {
+        "Address": "192.0.2.102"
+      }
+    }
+  ],
+  "restart": {
+    "required": true,
+    "mode": "restart",
+    "timeoutSeconds": 30
+  }
+}
