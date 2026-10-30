@@ -1,6 +1,6 @@
 {
   "name": "codex-abb-local-mcp",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "description": "Local ABB Robot Web Services MCP with controller identity locks and guarded batch jobs.",
@@ -49,9 +49,10 @@
     "test:backup-streaming": "node test/backup-streaming.mjs",
     "test:current-robtarget": "node test/current-robtarget.mjs",
     "test:read-redundancy": "node test/read-redundancy.mjs",
-    "test:all": "npm test && npm run test:tool-shaping && npm run test:cli && npm run test:worker && npm run test:scheduler && npm run test:single-flight-key && npm run test:mock && npm run test:backup && npm run test:direct-rws && npm run test:direct-backup && npm run test:direct-backup-manager && npm run test:direct-circuit && npm run test:direct-http-capacity && npm run test:direct-snapshot && npm run test:direct-pagination && npm run test:direct-queue && npm run test:direct-registry && npm run test:direct-session && npm run test:direct-signals && npm run test:direct-task-defaults && npm run test:rws2-http && npm run test:rws-adapter && npm run test:rws1-write-adapter && npm run test:rws2-write-adapter && npm run test:changeset-planner && npm run test:changeset-executor && npm run test:changeset-manager && npm run test:changeset-service-adapter && npm run test:changeset-service-rws2 && npm run test:backend-router-changeset && npm run test:lazy-routing && npm run test:native && npm run test:pcsdk && npm run test:read-performance && npm run test:planner-parallel && npm run test:backup-streaming && npm run test:current-robtarget && npm run test:read-redundancy && npm run test:scale && npm run test:perf",
+    "test:all": "npm test && npm run test:tool-shaping && npm run test:rapid-derive && npm run test:cli && npm run test:worker && npm run test:scheduler && npm run test:single-flight-key && npm run test:mock && npm run test:backup && npm run test:direct-rws && npm run test:direct-backup && npm run test:direct-backup-manager && npm run test:direct-circuit && npm run test:direct-http-capacity && npm run test:direct-snapshot && npm run test:direct-pagination && npm run test:direct-queue && npm run test:direct-registry && npm run test:direct-session && npm run test:direct-signals && npm run test:direct-task-defaults && npm run test:rws2-http && npm run test:rws-adapter && npm run test:rws1-write-adapter && npm run test:rws2-write-adapter && npm run test:changeset-planner && npm run test:changeset-executor && npm run test:changeset-manager && npm run test:changeset-service-adapter && npm run test:changeset-service-rws2 && npm run test:backend-router-changeset && npm run test:lazy-routing && npm run test:native && npm run test:pcsdk && npm run test:read-performance && npm run test:planner-parallel && npm run test:backup-streaming && npm run test:current-robtarget && npm run test:read-redundancy && npm run test:scale && npm run test:perf",
     "test:tool-shaping": "node test/tool-shaping.mjs",
-    "install:local": "pwsh -NoProfile -File install.ps1"
+    "install:local": "pwsh -NoProfile -File install.ps1",
+    "test:rapid-derive": "node test/rapid-derive.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

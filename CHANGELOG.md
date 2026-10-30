@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0 — 2026-10-30
+
+- Adds `abb_search_rapid` for bounded-concurrency module reads, routine outlines, case-insensitive regex search, optional context and local source files.
+- Adds `abb_derive_module` for local template-based product module generation with symbol renaming, optional point sequencing, conflict/reference reports and explicit target-value preservation. Template values are copied by default; controller writes still require an approved changeset.
+- Expands the MCP surface from 20 to 22 tools and adds offline search/derivation regression coverage.
+- Fixes RW7/OmniCore backups: uses the RWS2 `$BACKUP` root, appropriate FileService Accept headers and HTTP 201 completion handling, while preserving RW6/RWS1 behavior and backup verification.
+- Retains controller identity locks, stopped-RAPID and guardstop/motoroff preconditions, single-use approval tokens, overwrite protection and independent verification. No private controller configuration, credentials, field exports or private Git history is included.
+
 ## 1.6.1 — 2026-10-22
 
 - First standalone public distribution, based on the original 1.6.0 implementation including RWS pagination and completed-backup HTTP 303 handling.

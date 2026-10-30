@@ -326,9 +326,29 @@ export async function sha256File(filePath) {
   return hash.digest("hex");
 }
 
+// Controller backup directory: RW6 (RWS1) keeps backups under $SYSPAR,
+// RW7 OmniCore (RWS2) has no $SYSPAR root and uses $BACKUP.
+const BACKUP_ROOTS = new Set(["$SYSPAR", "$BACKUP"]);
+
+export function backupRootFor(rwsProtocol) {
+  return rwsProtocol === "rws2" ? "$BACKUP" : "$SYSPAR";
+}
+
+export function assertBackupRoot(root) {
+  const value = String(root ?? "$SYSPAR");
+  if (!BACKUP_ROOTS.has(value)) throw new Error(`Unsupported ABB backup root: ${value}`);
+  return value;
+}
+
+export function backupRootFromRemotePath(remotePath) {
+  const match = /^\/fileservice\/(\$[A-Z]+)\//.exec(String(remotePath ?? ""));
+  return assertBackupRoot(match ? match[1] : "$SYSPAR");
+}
+
 export async function readRemoteDirectoryEntries({
   request,
   backupName,
+  root = "$SYSPAR",
   relativeDirectory = "",
   initialResponse = null
 }) {
@@ -338,7 +358,7 @@ export async function readRemoteDirectoryEntries({
     ? normalizeRelativePath(relativeDirectory, "remote directory").split("/")
     : [];
   const encoded = encodeRemotePathSegments([safeBackupName, ...directorySegments]);
-  const directoryPath = `/fileservice/$SYSPAR/${encoded}/`;
+  const directoryPath = `/fileservice/${assertBackupRoot(root)}/${encoded}/`;
   let nextPath = `${directoryPath}?json=1`;
   let pendingInitialResponse = initialResponse;
   const visitedPages = new Set();
@@ -414,6 +434,7 @@ export async function readRemoteDirectoryEntries({
 export async function getRemoteBackupTree({
   request,
   backupName,
+  root = "$SYSPAR",
   rootResponse = null
 }) {
   const safeBackupName = assertBackupName(backupName);
@@ -428,6 +449,7 @@ export async function getRemoteBackupTree({
     const entries = await readRemoteDirectoryEntries({
       request,
       backupName: safeBackupName,
+      root,
       relativeDirectory: directory,
       initialResponse: directory === "" ? pendingRootResponse : null
     });
@@ -463,11 +485,12 @@ export async function getRemoteBackupTree({
 export async function getRemoteBackupSnapshot({
   request,
   backupName,
+  root = "$SYSPAR",
   shallow = false
 }) {
   if (typeof request !== "function") throw new Error("request must be an async function.");
   const safeBackupName = assertBackupName(backupName);
-  const remotePath = `/fileservice/$SYSPAR/${safeBackupName}`;
+  const remotePath = `/fileservice/${assertBackupRoot(root)}/${safeBackupName}`;
   const response = await request({ method: "GET", path: `${remotePath}/?json=1` });
   const statusCode = responseStatus(response);
   if (statusCode === 404) {
@@ -505,6 +528,7 @@ export async function getRemoteBackupSnapshot({
   const files = await getRemoteBackupTree({
     request,
     backupName: safeBackupName,
+    root,
     rootResponse: response
   });
   const statistics = measureRemoteTree(files);
@@ -833,7 +857,8 @@ export async function verifyBackupManifestV2({
   if (request) {
     const snapshot = await getRemoteBackupSnapshot({
       request,
-      backupName: loaded.manifest?.backupName
+      backupName: loaded.manifest?.backupName,
+      root: backupRootFromRemotePath(loaded.manifest?.remotePath)
     });
     if (!snapshot.Exists) {
       remoteErrors.push(

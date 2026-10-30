@@ -12,7 +12,9 @@ import { singleFlightKey } from "./canonical-json.mjs";
 import {
   expandChangeset,
   shapeConfigList,
+  shapeModuleDerive,
   shapeModuleRead,
+  shapeModuleSearch,
   stripDiagnostics
 } from "./tool-shaping.mjs";
 
@@ -167,7 +169,7 @@ function ensureWorkerReady() {
 
 
 const server = new McpServer(
-  { name: "abb-local", version: "1.6.1" },
+  { name: "abb-local", version: "1.7.0" },
   {
     instructions:
       "Local ABB engineering gateway. Read tools take a registered alias directly: they open, identity-check and reuse the session automatically, so do not call list/bind first. Use abb_list_controllers only when the alias is unknown, abb_bind_controller only to confirm identity explicitly. New cabinet: probe(includeResources=true), confirm identity, register discovered names. Read only what the task needs: read_rapid_module with routine or startLine/endLine for excerpts, saveToFile=true to get a LocalPath for editing large modules; list_config_instances with fields/limit. Changesets: expectedController is required and must state the cabinet the user intends to change (name/SystemId/RobotWare), confirmed against a live read; it is an independent lock beside the registry; safety defaults to stopped RAPID + guardstop/motoroff; rapid_module_put/replace take exactly one of inline source or localPath. Plans include SourceDiff; SafetyBlocked previews have no token and need a replan after local stop. Approve the exact token-bearing plan once, then apply without repeating discovery. Writes recheck endpoint/name/SystemId/RobotWare, stopped RAPID and GuardStop/MotorsOff. Apply with Verified=true and VerificationMode=independent-session is complete; use abb_verify_changeset only for missing evidence, unknown outcomes or later checks. Never replay an uncertain write or approve a different plan. Never start RAPID, enable motors, jog, force I/O or command motion. After a transport failure, do not scan aliases/protocols, launch PC SDK discovery or change networking without a user request. After tooling updates, compare abb_health version/diskVersion before claiming activation."
@@ -600,6 +602,112 @@ registerWorkerTool(
       view: { routine, startLine, endLine, saveToFile }
     }),
     present: (result, view) => shapeModuleRead(result, view, stagingDir)
+  }
+);
+
+// One call instead of list + N reads + local grep: the worker reads modules
+// with bounded concurrency on the shared session, shaping saves and searches them.
+const SEARCH_READ_CONCURRENCY = 4;
+async function readTaskModules(alias, task, filter) {
+  const readyWorker = await ensureWorkerReady();
+  const listed = await readyWorker.call("list_modules", { alias, task }, 60_000, queueWaitMs);
+  const resolvedTask = listed.Task ?? task;
+  const names = (listed.Modules ?? [])
+    .map((item) => item.Name)
+    .filter((name) => !filter || filter.test(name))
+    .sort();
+  const modules = new Array(names.length);
+  let next = 0;
+  const readNext = async () => {
+    while (next < names.length) {
+      const index = next++;
+      const read = await readyWorker.call(
+        "read_module",
+        { alias, task: resolvedTask, module: names[index] },
+        90_000,
+        queueWaitMs
+      );
+      modules[index] = { ...read, Alias: read.Alias ?? alias, Task: read.Task ?? resolvedTask };
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(SEARCH_READ_CONCURRENCY, names.length) }, readNext)
+  );
+  return { task: resolvedTask, modules };
+}
+
+server.registerTool(
+  "abb_search_rapid",
+  {
+    title: "Search ABB RAPID modules",
+    description:
+      "Read only: read every loaded module of one task (or those matching moduleFilter) in one call, save each to a local file (LocalPath, create-only like saveToFile), and return each module's routines (Name:line) plus case-insensitive regex pattern hits with optional context lines. Use it first to locate code by routine, signal or point name; then read only the hit with abb_read_rapid_module routine/startLine.",
+    inputSchema: {
+      alias: controllerAliasSchema,
+      task: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/).optional(),
+      pattern: z.string().min(1).max(500).optional(),
+      moduleFilter: z.string().min(1).max(200).optional(),
+      context: z.number().int().min(0).max(10).optional(),
+      maxMatches: z.number().int().min(1).max(2_000).optional(),
+      outline: z.boolean().optional(),
+      saveToFile: z.boolean().optional()
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  async ({ alias, task, pattern, moduleFilter, context, maxMatches, outline, saveToFile }) => {
+    try {
+      if (pattern) new RegExp(pattern, "i");
+      const filter = moduleFilter ? new RegExp(moduleFilter, "i") : null;
+      const { task: resolvedTask, modules } = await readTaskModules(alias, task, filter);
+      const shaped = await shapeModuleSearch(
+        modules,
+        { pattern, context, maxMatches, outline, saveToFile },
+        stagingDir
+      );
+      return toolResult({ Alias: alias, Task: resolvedTask, ...shaped });
+    } catch (error) {
+      return toolError(error);
+    }
+  }
+);
+
+server.registerTool(
+  "abb_derive_module",
+  {
+    title: "Derive ABB product module from another",
+    description:
+      "Read only: build product module `target` from module `template` (\"make product 14 like product 6\") in one call. The template's own routines and data get the target's number (STEP06_10 -> STEP14_10, A_Pick_06 -> A_Pick_14); all values (coordinates) are copied from the template, ReplacedTargetValues lists target data that changes (keepTargetValues=true keeps the target value instead); unused template data is dropped; untagged template data the target already uses stays shared. pointNames=sequence renames the template's robtargets to P<N>_1..k in path order (for messy point names). Returns LocalPath ready for abb_plan_changeset rapid_module_replace, plus ReplacedTargetValues, KeptTargetValues, NewData, Conflicts, BrokenReferences, Identical/SameIgnoringWhitespace.",
+    inputSchema: {
+      alias: controllerAliasSchema,
+      task: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/).optional(),
+      template: z.string().regex(/^[A-Za-z0-9_]{1,128}$/),
+      target: z.string().regex(/^[A-Za-z0-9_]{1,128}$/),
+      pointNames: z.enum(["template", "sequence"]).optional(),
+      templateTag: z.string().regex(/^\d{1,4}$/).optional(),
+      targetTag: z.string().regex(/^\d{1,4}$/).optional(),
+      keepUnused: z.boolean().optional(),
+      keepTargetValues: z.boolean().optional()
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  async ({ alias, task, template, target, pointNames, templateTag, targetTag, keepUnused, keepTargetValues }) => {
+    try {
+      const { task: resolvedTask, modules } = await readTaskModules(alias, task, null);
+      const find = (name) => modules.find((item) => item.Module.toLowerCase() === name.toLowerCase());
+      const templateModule = find(template);
+      if (!templateModule) throw new Error(`Template module ${template} is not loaded in ${resolvedTask}.`);
+      const targetModule = find(target) ?? { Module: target, Alias: alias, Task: resolvedTask };
+      const shaped = await shapeModuleDerive(
+        templateModule,
+        targetModule,
+        modules,
+        { pointNames, templateTag, targetTag, keepUnused, keepTargetValues },
+        stagingDir
+      );
+      return toolResult({ Alias: alias, Task: resolvedTask, ...shaped });
+    } catch (error) {
+      return toolError(error);
+    }
   }
 );
 

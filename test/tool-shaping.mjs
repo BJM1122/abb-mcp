@@ -8,6 +8,7 @@ import {
   moduleExtension,
   shapeConfigList,
   shapeModuleRead,
+  shapeModuleSearch,
   stripDiagnostics
 } from "../tool-shaping.mjs";
 
@@ -160,6 +161,32 @@ try {
     ),
     /either source or localPath/
   );
+  const searched = await shapeModuleSearch(
+    [
+      { Alias: "r", Task: "T", Module: "MainModule", SourceSha256: "a", Text: source },
+      { Alias: "r", Task: "T", Module: "Other", SourceSha256: "b", Text: "MODULE Other\nPROC x()\n  WAITTIME 2;\nENDPROC\nENDMODULE\n" }
+    ],
+    { pattern: "waittime", context: 1, maxMatches: 1 },
+    staging
+  );
+  assert.equal(searched.ModuleCount, 2);
+  assert.deepEqual(searched.Modules[0].Routines, ["main:3", "Pick:6", "Twice:9", "OnErr:12"]);
+  assert.deepEqual(searched.Modules[1].Routines, ["x:2"]);
+  assert.equal(searched.MatchCount, 2, "pattern is case-insensitive");
+  assert.equal(searched.Matches.length, 1);
+  assert.equal(searched.Truncated, true);
+  assert.deepEqual(
+    { Module: searched.Matches[0].Module, Line: searched.Matches[0].Line, ContextStart: searched.Matches[0].ContextStart },
+    { Module: "MainModule", Line: 7, ContextStart: 6 }
+  );
+  assert.equal(await readFile(searched.Modules[1].LocalPath, "utf8"), "MODULE Other\nPROC x()\n  WAITTIME 2;\nENDPROC\nENDMODULE\n");
+  const outlineOnly = await shapeModuleSearch(
+    [{ Alias: "r", Task: "T", Module: "Other", Text: "MODULE Other\nENDMODULE" }],
+    { saveToFile: false },
+    staging
+  );
+  assert.equal(outlineOnly.Matches, undefined);
+  assert.equal(outlineOnly.Modules[0].LocalPath, undefined);
   console.log("tool-shaping ok");
 } finally {
   await rm(staging, { recursive: true, force: true });

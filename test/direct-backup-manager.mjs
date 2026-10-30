@@ -78,7 +78,9 @@ const service = {
     closeCount += 1;
   },
   async bindingRequest(_binding, options, _operation, allowed) {
-    const expectedRoot = protocol === "rws2" ? "/fileservice/$SYSPAR/" : "/fileservice/$SYSPAR/?json=1";
+    // RW7 (RWS2) has no $SYSPAR root; its backups live under $BACKUP.
+    const backupRoot = protocol === "rws2" ? "$BACKUP" : "$SYSPAR";
+    const expectedRoot = protocol === "rws2" ? `/fileservice/${backupRoot}/` : `/fileservice/${backupRoot}/?json=1`;
     if (protocol === "rws2") assert.ok(!options.path.includes("json="));
     if (options.method === "GET" && options.path === expectedRoot) {
       remoteConflictChecks += 1;
@@ -90,7 +92,7 @@ const service = {
       assert.equal(options.form.archive, "FALSE");
       assert.equal(
         options.form.backup,
-        `/fileservice/$SYSPAR/${backupName}`
+        `/fileservice/${backupRoot}/${backupName}`
       );
       assert.ok(allowed.includes(202));
       return {
@@ -113,17 +115,23 @@ const service = {
           bytes: Buffer.alloc(0)
         };
       }
+      if (protocol === "rws2") {
+        // Observed on RW 7.20: 201 Created with state=ready, code=294912 when finished.
+        return {
+          statusCode: 201,
+          body: JSON.stringify({ state: [{ state: "ready", code: "294912" }] }),
+          bytes: Buffer.alloc(0)
+        };
+      }
       return {
         statusCode: 200,
-        body: JSON.stringify(protocol === "rws2"
-          ? { state: [{ state: "ready", code: "294913" }] }
-          : payload([{ state: "DONE", code: "294913" }])),
+        body: JSON.stringify(payload([{ state: "DONE", code: "294913" }])),
         bytes: Buffer.alloc(0)
       };
     }
     const directoryMatch = options.path.match(
       new RegExp(
-        `^/fileservice/\\$SYSPAR/${backupName}/(RAPID/|SYSPAR/)?(?:\\?json=1)?$`
+        `^/fileservice/\\${backupRoot}/${backupName}/(RAPID/|SYSPAR/)?(?:\\?json=1)?$`
       )
     );
     if (directoryMatch) {
@@ -135,7 +143,7 @@ const service = {
         bytes: Buffer.from(body, "utf8")
       };
     }
-    const filePrefix = `/fileservice/$SYSPAR/${backupName}/`;
+    const filePrefix = `/fileservice/${backupRoot}/${backupName}/`;
     if (options.method === "GET" && options.path.startsWith(filePrefix)) {
       const relativePath = options.path.slice(filePrefix.length);
       const bytes = files.get(relativePath);

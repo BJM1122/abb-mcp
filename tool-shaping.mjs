@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { deriveModule } from "./rapid-derive.mjs";
 
 const DIAGNOSTIC_KEYS = [
   "Metrics",
@@ -119,6 +120,79 @@ export async function shapeModuleRead(result, view, stagingDir) {
     output.Range = { Start: start, End: end };
   }
   return output;
+}
+
+// modules: [{ Alias, Task, Module, Text, SourceSha256 }] read in one batch.
+// view: { pattern?, context?, maxMatches?, outline?, saveToFile? }
+// Outline lists each module's routines; Matches holds pattern hits (case-insensitive).
+export async function shapeModuleSearch(modules, view, stagingDir) {
+  const regex = view.pattern ? new RegExp(view.pattern, "i") : null;
+  const context = view.context ?? 0;
+  const maxMatches = view.maxMatches ?? 200;
+  const outline = [];
+  const matches = [];
+  let matchCount = 0;
+  for (const module of modules) {
+    const text = String(module.Text ?? "");
+    const lines = text.split(/\r?\n/);
+    if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+    const entry = { Module: module.Module, SourceSha256: module.SourceSha256, LineCount: lines.length };
+    if (view.outline !== false) {
+      entry.Routines = lines
+        .map((line, index) => [ROUTINE_START.exec(`${line} `), index + 1])
+        .filter(([match]) => match)
+        .map(([match, line]) => `${match[1]}:${line}`);
+    }
+    if (view.saveToFile !== false) {
+      const file = contentFile(
+        path.join(stagingDir, "modules", safeSegment(module.Alias), safeSegment(module.Task)),
+        module.Module,
+        text
+      );
+      entry.LocalPath = file;
+      if (await writeUnlessPresent(file, text)) entry.LocalEdited = true;
+    }
+    outline.push(entry);
+    if (!regex) continue;
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!regex.test(lines[index])) continue;
+      matchCount += 1;
+      if (matches.length >= maxMatches) continue;
+      const hit = { Module: module.Module, Line: index + 1, Text: lines[index].trim() };
+      if (context > 0) {
+        const start = Math.max(0, index - context);
+        hit.Context = lines.slice(start, Math.min(lines.length, index + context + 1)).join("\n");
+        hit.ContextStart = start + 1;
+      }
+      matches.push(hit);
+    }
+  }
+  const output = { ModuleCount: modules.length, Modules: outline };
+  if (regex) {
+    output.MatchCount = matchCount;
+    output.Matches = matches;
+    if (matchCount > matches.length) output.Truncated = true;
+  }
+  return output;
+}
+
+// Derived source lands under staging/derived so the planner accepts its localPath.
+export async function shapeModuleDerive(template, target, modules, options, stagingDir) {
+  const { Source, Report } = deriveModule({ template, target, others: modules, options });
+  const file = contentFile(
+    path.join(stagingDir, "derived", safeSegment(template.Alias), safeSegment(template.Task)),
+    target.Module,
+    Source
+  );
+  await writeIfChanged(file, Source);
+  return {
+    ...Report,
+    TargetSourceSha256: target.SourceSha256,
+    LocalPath: file,
+    PlanOperation: Report.Identical
+      ? null
+      : { kind: "rapid_module_replace", task: template.Task, module: target.Module, localPath: file }
+  };
 }
 
 // view: { fields?, limit? }

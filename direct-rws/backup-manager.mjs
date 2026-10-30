@@ -12,6 +12,8 @@ import path from "node:path";
 import {
   assertBackupName,
   backupResourceItems,
+  backupRootFor,
+  backupRootFromRemotePath,
   createBackupManifestV2,
   encodeRemotePathSegments,
   getRemoteBackupSnapshot,
@@ -306,6 +308,13 @@ export class DirectBackupManager {
       const url = new URL(sameOriginPath(options.path, binding.config.baseUrl), binding.config.baseUrl);
       url.searchParams.delete("json");
       options = { ...options, path: `${url.pathname}${url.search}` };
+      // RW7 FileService answers the combined default Accept with HTTP 406:
+      // directory listings need hal+json, file downloads octet-stream.
+      if (options.method === "GET" && url.pathname.startsWith("/fileservice/") && !options.accept) {
+        options.accept = url.pathname.endsWith("/")
+          ? "application/hal+json;v=2.0"
+          : "application/octet-stream;v=2.0";
+      }
     }
     return await this.service.bindingRequest(
       binding,
@@ -355,7 +364,8 @@ export class DirectBackupManager {
 
   async remoteBackupNameExists(binding, backupName) {
     const expected = String(backupName).toLowerCase();
-    let nextPath = "/fileservice/$SYSPAR/?json=1";
+    const root = backupRootFor(binding.config.rwsProtocol);
+    let nextPath = `/fileservice/${root}/?json=1`;
     const visited = new Set();
     let entries = 0;
     const deadline = Date.now() + REMOTE_CONFLICT_CHECK_TIMEOUT_MS;
@@ -363,13 +373,13 @@ export class DirectBackupManager {
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) {
         const error = new Error(
-          "ABB $SYSPAR collision check exceeded its 5-second overall deadline."
+          "ABB backup-root collision check exceeded its 5-second overall deadline."
         );
         error.code = "RwsFileServiceTimeout";
         throw error;
       }
       if (visited.has(nextPath.toLowerCase()) || visited.size >= 100) {
-        throw new Error("ABB $SYSPAR directory pagination is unsafe or excessive.");
+        throw new Error("ABB backup-root directory pagination is unsafe or excessive.");
       }
       visited.add(nextPath.toLowerCase());
       const response = await this.request(
@@ -385,7 +395,7 @@ export class DirectBackupManager {
             ) * 1_000
           )
         },
-        "List ABB $SYSPAR backup targets",
+        "List ABB backup-root targets",
         [200]
       );
       let document;
@@ -393,14 +403,14 @@ export class DirectBackupManager {
         document = JSON.parse(response.body);
       } catch (error) {
         throw new Error(
-          `ABB $SYSPAR listing returned invalid JSON: ${error.message}`
+          `ABB backup-root listing returned invalid JSON: ${error.message}`
         );
       }
       const items = backupResourceItems(document);
       for (const item of items) {
         entries += 1;
         if (entries > 10_000) {
-          throw new Error("ABB $SYSPAR listing exceeded the 10000-entry safety limit.");
+          throw new Error("ABB backup-root listing exceeded the 10000-entry safety limit.");
         }
         const name = String(item?._title ?? item?.name ?? "").trim();
         if (name.toLowerCase() === expected) return true;
@@ -414,8 +424,8 @@ export class DirectBackupManager {
         continue;
       }
       nextPath = sameOriginPath(href, binding.config.baseUrl);
-      if (!nextPath.toLowerCase().startsWith("/fileservice/$syspar/")) {
-        throw new Error(`Unsafe ABB $SYSPAR pagination path: ${nextPath}`);
+      if (!nextPath.toLowerCase().startsWith(`/fileservice/${root.toLowerCase()}/`)) {
+        throw new Error(`Unsafe ABB backup-root pagination path: ${nextPath}`);
       }
       if (!/[?&]json=1(?:&|$)/i.test(nextPath)) {
         nextPath += nextPath.includes("?") ? "&json=1" : "?json=1";
@@ -451,16 +461,16 @@ export class DirectBackupManager {
     }
 
     const { binding, identity, state } = await this.freshPreflight(alias);
+    const remotePath = `/fileservice/${backupRootFor(binding.config.rwsProtocol)}/${backupName}`;
     if (await this.remoteBackupNameExists(binding, backupName)) {
       throw new Error(
-        `Remote ABB backup target already exists; overwrite is forbidden: ` +
-          `/fileservice/$SYSPAR/${backupName}`
+        `Remote ABB backup target already exists; overwrite is forbidden: ${remotePath}`
       );
     }
     const remoteSnapshot = {
       Exists: false,
       BackupName: backupName,
-      RemotePath: `/fileservice/$SYSPAR/${backupName}`,
+      RemotePath: remotePath,
       FileCount: 0,
       KnownSizeCount: 0,
       KnownBytes: 0,
@@ -550,7 +560,8 @@ export class DirectBackupManager {
         "Read ABB backup progress",
         // RW 6.11 RWS1 answers a finished progress resource with 303 See Other
         // pointing at the backup directory, state=ready, code=294912.
-        [200, 303]
+        // RW 7.20 RWS2 answers it with 201 Created, state=ready, code=294912.
+        [200, 201, 303]
       );
       const progress = parseProgress(response);
       finalState = progress.state;
@@ -586,7 +597,8 @@ export class DirectBackupManager {
       if (
         /^(DONE|COMPLETED|SUCCESS|OK)$/i.test(finalState) ||
         finalCode === "294913" ||
-        (response.statusCode === 303 && /^ready$/i.test(finalState))
+        ((response.statusCode === 303 || response.statusCode === 201) &&
+          /^ready$/i.test(finalState))
       ) {
         return { location, finalState, finalCode };
       }
@@ -638,7 +650,8 @@ export class DirectBackupManager {
           }
           const encoded = encodeRemotePathSegments(file.RelativePath.split("/"));
           const remotePath =
-            `/fileservice/$SYSPAR/${encodeURIComponent(plan.BackupName)}/${encoded}`;
+            `/fileservice/${backupRootFromRemotePath(plan.RemotePath)}/` +
+            `${encodeURIComponent(plan.BackupName)}/${encoded}`;
           const localPath = resolveBackupLocalFilePath(
             plan.LocalPath,
             file.RelativePath
@@ -816,7 +829,8 @@ export class DirectBackupManager {
       stage = "enumerate-before-download";
       const remoteBefore = await getRemoteBackupSnapshot({
         request: this.remoteRequest(binding, deadline),
-        backupName: plan.BackupName
+        backupName: plan.BackupName,
+        root: backupRootFromRemotePath(plan.RemotePath)
       });
       if (!remoteBefore.Exists || remoteBefore.FileCount < 1) {
         throw new Error("Remote ABB backup tree is empty after completion.");
@@ -834,7 +848,8 @@ export class DirectBackupManager {
       const downloadedAt = performance.now();
       const remoteAfter = await getRemoteBackupSnapshot({
         request: this.remoteRequest(binding, deadline),
-        backupName: plan.BackupName
+        backupName: plan.BackupName,
+        root: backupRootFromRemotePath(plan.RemotePath)
       });
       if (
         getRemoteTreeShape(remoteBefore.Files).join("\n") !==

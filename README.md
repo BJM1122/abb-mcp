@@ -1,8 +1,8 @@
 # ABB MCP
 
-用于 Windows 的本地 ABB Robot Web Services MCP 服务和 `abbctl` 命令行工具。支持 Claude Code、Codex 和兼容 stdio MCP 的客户端。公开发行版 **1.6.1**，基于原工具 1.6.0，并包含 RWS 分页及备份 HTTP 303 完成状态修复。
+用于 Windows 的本地 ABB Robot Web Services MCP 服务和 `abbctl` 命令行工具。支持 Claude Code、Codex 和兼容 stdio MCP 的客户端。公开发行版 **1.7.0**，新增 RAPID 批量搜索、模板模块生成，并修复 RW7/OmniCore 备份兼容性。
 
-**完整功能版：保留原工具的 20 个 MCP 工具、CLI、Node.js 直连读写/备份、legacy PowerShell 后端和可选 PC SDK helper。** 不包含作者的控制器登记、密码、证书指纹、机器人程序、备份、现场数据或原私有仓库历史。示例地址 `192.0.2.x` 仅用于文档，不能直接连接机器人。
+**完整功能版：提供 22 个 MCP 工具、CLI、Node.js 直连读写/备份、legacy PowerShell 后端和可选 PC SDK helper。** 不包含作者的控制器登记、密码、证书指纹、机器人程序、备份、现场数据或原私有仓库历史。示例地址 `192.0.2.x` 仅用于文档，不能直接连接机器人。
 
 ## 1. 安装
 
@@ -58,7 +58,7 @@ args = ['C:\ABB_MCP\server.mjs']
 env = { ABB_MCP_CHANGESET_BACKEND = "direct-rws-preview", ABB_MCP_ALLOW_LEGACY = "0" }
 ```
 
-若客户端找不到 `node`，将 `command` 换成 `Get-Command node` 返回的绝对路径。参考 [Codex 官方 MCP 文档](https://developers.openai.com/codex/mcp)。重新打开客户端/建立新会话，调用 `abb_health`，确认 `version: 1.6.1`、`restartRequired: false`，以及 `read/backup: direct-rws`、`changeset: direct-rws-preview`。配置列表能显示服务不等于运行连接已经成功。
+若客户端找不到 `node`，将 `command` 换成 `Get-Command node` 返回的绝对路径。参考 [Codex 官方 MCP 文档](https://developers.openai.com/codex/mcp)。重新打开客户端/建立新会话，调用 `abb_health`，确认 `version: 1.7.0`、`diskVersion: 1.7.0`、`restartRequired: false`，以及 `read/backup: direct-rws`、`changeset: direct-rws-preview`。配置列表能显示服务不等于运行连接已经成功。
 
 ### DeepSeek
 
@@ -66,7 +66,7 @@ env = { ABB_MCP_CHANGESET_BACKEND = "direct-rws-preview", ABB_MCP_ALLOW_LEGACY =
 
 1. 在 Cline 的 Settings 中选择 DeepSeek provider，填写**自己的** DeepSeek API key 并选择支持工具调用的模型。模型凭据只配置在客户端，不填入 ABB registry，也不提交到本仓库。
 2. 打开 Cline 的 MCP Servers → Configure → Configure MCP Servers，将下面的通用 `mcpServers` JSON 合并进去，修改成本机路径；保留 `autoApprove: []`，不要自动批准机器人写入。
-3. 确认出现 20 个 `abb_*` 工具，先调用 `abb_health`。完成自己的控制器登记后再读取或准备变更。
+3. 确认出现 22 个 `abb_*` 工具，先调用 `abb_health`。完成自己的控制器登记后再读取或准备变更。
 
 也可按 [DeepSeek 官方 Claude Code 接入说明](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/)在客户端设置 DeepSeek，然后沿用上面的 Claude Code MCP 注册命令。ABB MCP 本身不绑定模型供应商。
 
@@ -123,10 +123,15 @@ node .\abbctl.mjs controllers
 | 健康、版本、别名、接入、会话 | `abb_health`, `abb_list_controllers`, `abb_probe_controller`, `abb_register_controller`, `abb_bind_controller`, `abb_disconnect` |
 | 状态、信号、系统配置 | `abb_controller_snapshot`, `abb_read_signals`, `abb_list_config_instances`, `abb_read_config_instance` |
 | RAPID 模块、符号、当前位置只读 | `abb_list_rapid_modules`, `abb_read_rapid_module`, `abb_read_rapid_data`, `abb_read_current_robtarget` |
+| RAPID 批量搜索、模板模块生成（只读） | `abb_search_rapid`, `abb_derive_module` |
 | 配置/RAPID 批量修改 | `abb_plan_changeset`, `abb_apply_changeset`, `abb_verify_changeset` |
 | 控制柜完整备份、下载、验证 | `abb_plan_backup`, `abb_apply_backup`, `abb_verify_backup` |
 
 模块读取支持按例程/行号摘录及保存；配置列表支持字段筛选和数量限制。配置、PROFINET、信号、RAPID 模块更新/移除、build 和可选 restart 使用 [changeset.schema.json](changeset.schema.json)，示例见 [examples](examples/)。CLI `batch` 可复用同一传输和 RWS 会话。
+
+`abb_search_rapid` 批量读取一个任务的模块，返回例程目录、正则匹配及可选上下文；默认保存模块到本地 staging。`abb_derive_module` 在本地按模板生成目标模块，默认复制模板数值，`keepTargetValues=true` 可保留目标已有数值，并报告名称冲突、引用问题和数值变化。生成结果仍须通过 `abb_plan_changeset` 审查并批准后才能写入控制器。
+
+RW6/RWS1 备份使用 `$SYSPAR`，RW7/RWS2 使用 `$BACKUP`；RWS2 目录和文件请求分别使用对应的 Accept 类型，并识别 HTTP 201 的备份完成状态。备份仍要求停止 RAPID 和 guardstop/motoroff，保留防覆盖、单次审批和独立验证。
 
 工具接口一致不代表所有柜都支持同一操作：RWS 版本、控制器选项、账号权限和现场状态仍决定可用能力。RWS2 的离线 Mock 验证不代表所有 OmniCore 现场写入均已验证。
 
