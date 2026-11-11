@@ -174,3 +174,7 @@ npm run test:all
 ## 隐私与分发
 
 `.gitignore` 排除本地 registry、凭据、`.env`、证书/私钥、备份、导出、日志、生成二进制和缓存。仓库只有通用代码和虚构测试数据。提交前仍应检查 `git diff --cached`，不要把现场数据写入源码、Issue 或截图。当前为 Git 克隆安装，未发布 npm 包，也没有声称支持直接 `npx` 安装。
+
+## 许可证
+
+[MIT](LICENSE)。ABB、RobotWare、RobotStudio 是 ABB 的商标；本项目与 ABB 无隶属或背书关系。

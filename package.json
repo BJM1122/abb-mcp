@@ -1,6 +1,7 @@
 {
   "name": "codex-abb-local-mcp",
   "version": "1.8.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Local ABB Robot Web Services MCP with controller identity locks and guarded batch jobs.",
