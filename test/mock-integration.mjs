@@ -559,7 +559,10 @@ const transport = new StdioClientTransport({
     ...Object.fromEntries(Object.entries(process.env).filter(([, value]) => typeof value === "string")),
     ABB_MCP_REGISTRY: registryPath,
     ABB_MCP_OFFLINE_COOLDOWN_MS: "500",
-    ABB_MCP_DIAGNOSTICS: "1"
+    ABB_MCP_DIAGNOSTICS: "1",
+    // This suite drives the legacy PowerShell changeset worker end to end;
+    // keep it on legacy now that direct RWS is the default route.
+    ABB_MCP_CHANGESET_BACKEND: process.env.ABB_MCP_CHANGESET_BACKEND ?? "legacy"
   },
   stderr: "pipe"
 });

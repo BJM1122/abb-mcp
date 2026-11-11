@@ -20,6 +20,7 @@ let peakRequests = 0;
 let identityComplete = false;
 let nonIdentityBeforeIdentity = false;
 let failureMode = false;
+let networkMode = "ok";
 let snapshotCompletions = 0;
 
 function payload(pathname) {
@@ -84,6 +85,19 @@ const server = http.createServer((request, response) => {
   if (failureMode && pathname === "/rw/panel/opmode") {
     setTimeout(() => finish(500, '{"error":"fixture failure"}'), 5);
     return;
+  }
+  if (pathname.startsWith("/rw/cfg/eio/INDUSTRIAL_NETWORK/")) {
+    if (networkMode === "missingType") {
+      setTimeout(
+        () => finish(400, '{"status":{"msg":"Invalid type id"}}'),
+        5
+      );
+      return;
+    }
+    if (networkMode === "serverError") {
+      setTimeout(() => finish(500, '{"error":"network fixture failure"}'), 5);
+      return;
+    }
   }
   setTimeout(() => finish(200, JSON.stringify(payload(pathname))), delayMs);
 });
@@ -153,6 +167,8 @@ try {
   assert.equal(cold.State.Opmode, "AUTO");
   assert.equal(cold.RapidModules[0].Name, "MainModule");
   assert.equal(cold.IndustrialNetwork.Name, "PROFINET");
+  assert.equal(cold.IndustrialNetworkType, "INDUSTRIAL_NETWORK");
+  assert.equal("IndustrialNetworkError" in cold, false);
   assert.equal(nonIdentityBeforeIdentity, false, "snapshot reads started before identity verification");
   assert.equal(snapshotCompletions, 5);
   assert.equal(peakRequests, 4);
@@ -175,6 +191,46 @@ try {
   assert.equal(activeRequests, 0, "snapshot released its alias lock with reads still active");
   assert.equal(snapshotCompletions, 5, "snapshot did not settle every started read after failure");
   failureMode = false;
+
+  // A cabinet that lacks the network type keeps the rest of the snapshot.
+  networkMode = "missingType";
+  const missingType = await service.call("snapshot", { alias }, 5_000, 1_000);
+  assert.equal(missingType.State.Opmode, "AUTO");
+  assert.equal(missingType.RapidModules[0].Name, "MainModule");
+  assert.equal(missingType.IndustrialNetwork, null);
+  assert.match(missingType.IndustrialNetworkError, /HTTP 400.*Invalid type id/);
+
+  // Any other network read failure still fails the snapshot.
+  networkMode = "serverError";
+  await assert.rejects(
+    service.call("snapshot", { alias }, 5_000, 1_000),
+    /Read configuration eio\/INDUSTRIAL_NETWORK\/PROFINET failed HTTP 500/
+  );
+  networkMode = "ok";
+
+  // RobotWare 7 (RWS2) has no INDUSTRIAL_NETWORK type; it reads PROFINET_NETWORK.
+  const requestedTypes = [];
+  const original = {
+    configInstance: service.configInstance,
+    controllerState: service.controllerState,
+    rapidModules: service.rapidModules
+  };
+  service.configInstance = async (_binding, domain, type, instance) => {
+    requestedTypes.push(`${domain}/${type}/${instance}`);
+    return { Attributes: { Name: instance, StationName: "robot1" } };
+  };
+  service.controllerState = async () => ({ Opmode: "AUTO" });
+  service.rapidModules = async () => [];
+  binding.protocol = "rws2";
+  try {
+    const rws2 = await service.call("snapshot", { alias }, 5_000, 1_000);
+    assert.deepEqual(requestedTypes, ["eio/PROFINET_NETWORK/PROFINET"]);
+    assert.equal(rws2.IndustrialNetworkType, "PROFINET_NETWORK");
+    assert.equal(rws2.IndustrialNetwork.StationName, "robot1");
+  } finally {
+    binding.protocol = "rws1";
+    Object.assign(service, original);
+  }
 
   peakRequests = 0;
   await service.controllerState(binding);

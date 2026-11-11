@@ -271,6 +271,19 @@ function signalBelongsToBinding(item, binding) {
   );
 }
 
+// RobotWare 6 (RWS1) keeps fieldbus networks under one INDUSTRIAL_NETWORK
+// type; RobotWare 7 (RWS2) splits them per fieldbus and has no such type.
+function snapshotNetworkType(protocol) {
+  return protocol === RWS2 ? "PROFINET_NETWORK" : "INDUSTRIAL_NETWORK";
+}
+
+function isMissingConfigTypeError(error) {
+  return (
+    (error?.statusCode === 400 || error?.statusCode === 404) &&
+    /type does not exist|invalid type id/i.test(String(error?.message || ""))
+  );
+}
+
 async function settledValues(promises) {
   const settled = await Promise.allSettled(promises);
   const rejected = settled.find((item) => item.status === "rejected");
@@ -1408,7 +1421,7 @@ export class DirectRwsService {
     switch (method) {
       case "health": {
         await this.reloadRegistry();
-        const version = "1.7.0";
+        const version = "1.8.0";
         let diskVersion = null;
         let versionCheckError;
         try {
@@ -1525,15 +1538,21 @@ export class DirectRwsService {
         const binding = await this.binding(alias);
         const identityRead = await this.identityForRead(binding, 5);
         const task = rapidTaskForRead(binding, undefined);
+        const networkType = snapshotNetworkType(binding.protocol);
         const [state, modules, network] = await settledValues([
           this.controllerState(binding, { parallel: true }),
           this.rapidModules(binding, task),
           this.configInstance(
             binding,
             "eio",
-            "INDUSTRIAL_NETWORK",
+            networkType,
             String(binding.config.ioNetwork)
-          )
+          ).catch((error) => {
+            // A cabinet without this network type must not sink the whole
+            // snapshot; transport and other failures still propagate.
+            if (!isMissingConfigTypeError(error)) throw error;
+            return { Attributes: null, Error: error.message };
+          })
         ]);
         const after = copyMetrics(this.metricsFor(alias));
         return {
@@ -1545,6 +1564,8 @@ export class DirectRwsService {
           State: state,
           RapidModules: modules,
           IndustrialNetwork: network.Attributes,
+          IndustrialNetworkType: networkType,
+          ...(network.Error ? { IndustrialNetworkError: network.Error } : {}),
           Session: {
             BoundAt: binding.boundAt,
             Metrics: after,

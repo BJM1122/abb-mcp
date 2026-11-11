@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.0 — 2026-11-10
+
+- Changesets now default to the direct Node.js RWS backend (`direct-rws-preview`, RWS1 and RWS2) and no longer start PowerShell by default. The legacy PowerShell worker supports RWS1 only and stays available with an explicit `ABB_MCP_CHANGESET_BACKEND=legacy`, mainly for its `cfg_file_load` `add-with-reset` mode. Direct failures never fall back to legacy silently.
+- `rapid_module_put` / `rapid_module_replace` refuse to produce a plan when the module source contains empty arguments (`,;`, `,)`, `,,`, `(,`, outside comments and strings), reporting line, column and text. Module text held in controller memory can compile there yet fail to load as a file, breaking the whole task. Placeholders such as `<SMT>` are not rejected.
+- On an RWS2 certificate pin mismatch, the error names the local registry alias whose pin matches the certificate actually presented, which helps when several cabinets share one address. The comparison is local and sends no extra requests.
+- `abb_controller_snapshot` reads `PROFINET_NETWORK` on RWS2 / RobotWare 7, which has no `INDUSTRIAL_NETWORK` type, and reports `IndustrialNetworkType`. If the network type is missing, the rest of the snapshot is still returned with `IndustrialNetworkError`.
+- Retains all 22 tools, controller identity locks, stopped-RAPID and guardstop/motoroff preconditions, single-use approval tokens and independent verification. No private controller configuration, credentials, field exports or private Git history is included.
+
+The direct backend has completed a RAPID module replacement with independent readback on one OmniCore controller (RobotWare 7.20). Configuration writes on OmniCore and the other RWS2 write paths remain covered by offline mocks only.
+
 ## 1.7.0 — 2026-10-30
 
 - Adds `abb_search_rapid` for bounded-concurrency module reads, routine outlines, case-insensitive regex search, optional context and local source files.

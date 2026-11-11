@@ -404,6 +404,58 @@ function sourceDifference(before, after) {
   };
 }
 
+// Text read back from a running module can hold leftovers the controller
+// accepts in memory but rejects when loading a file (e.g. `WaitTime 0.5,;`).
+// Loading such a file leaves the task unbuildable, so refuse it at plan time.
+// Placeholders like <SMT> are not listed: modules holding them load and build.
+const RAPID_SOURCE_RULES = [
+  [/,\s*[;)]/g, "empty argument"],
+  [/,\s*,/g, "empty argument"],
+  [/\(\s*,/g, "empty argument"]
+];
+
+function rapidSourceProblems(source) {
+  // Blank out string contents and comments so only code is checked;
+  // newlines and columns stay in place for reporting.
+  let code = "";
+  let inString = false;
+  let inComment = false;
+  for (const ch of psString(source)) {
+    if (ch === "\n" || ch === "\r") {
+      inString = false;
+      inComment = false;
+      code += ch;
+    } else if (inComment) {
+      code += " ";
+    } else if (inString) {
+      if (ch === "\"") inString = false;
+      code += ch === "\"" ? ch : " ";
+    } else if (ch === "!") {
+      inComment = true;
+      code += " ";
+    } else {
+      if (ch === "\"") inString = true;
+      code += ch;
+    }
+  }
+  const rawLines = psString(source).split(/\r\n?|\n/);
+  const problems = [];
+  for (const [pattern, reason] of RAPID_SOURCE_RULES) {
+    for (const match of code.matchAll(pattern)) {
+      const before = [...code.slice(0, match.index)];
+      const lineStart = before.lastIndexOf("\n") + 1;
+      const line = before.filter((ch) => ch === "\n").length + 1;
+      problems.push({
+        Line: line,
+        Column: before.length - lineStart + 1,
+        Reason: reason,
+        Text: (rawLines[line - 1] ?? "").trim().slice(0, 120)
+      });
+    }
+  }
+  return problems.sort((a, b) => a.Line - b.Line || a.Column - b.Column);
+}
+
 function getCfgTextDomain(text, allowedDomains) {
   const firstLine = psString(text)
     .split(/\r?\n/)
@@ -1199,6 +1251,18 @@ async function prepareOperation(planner, context, operation) {
     if (!declaration.test(source)) {
       throw new Error(`RAPID source does not declare MODULE ${module}`);
     }
+    const problems = rapidSourceProblems(source);
+    if (problems.length > 0) {
+      const listed = problems.slice(0, 10).map((item) =>
+        `line ${item.Line} col ${item.Column} ${item.Reason}: ${item.Text}`
+      );
+      if (problems.length > 10) listed.push(`... ${problems.length - 10} more`);
+      throw new Error(
+        `RAPID source ${captured.LocalPath} would fail to load as a file; ` +
+          `fix it before planning (the online module may hold the same text): ` +
+          listed.join("; ")
+      );
+    }
     const online = await context.getRapidModuleText(task, module, {
       allowMissing: true
     });
@@ -1711,6 +1775,7 @@ export {
   getCfgTextDomain,
   parseCfgText,
   publicPreparedOperation,
+  rapidSourceProblems,
   sha256Bytes,
   sha256Text
 };

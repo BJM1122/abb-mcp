@@ -6,6 +6,7 @@ import {
   expandChangeset,
   findRoutine,
   moduleExtension,
+  pinMismatchHint,
   shapeConfigList,
   shapeModuleRead,
   shapeModuleSearch,
@@ -187,6 +188,18 @@ try {
   );
   assert.equal(outlineOnly.Matches, undefined);
   assert.equal(outlineOnly.Modules[0].LocalPath, undefined);
+  const pinA = "A".repeat(64);
+  const pinB = "B".repeat(64);
+  const pinRegistry = { controllers: { r1: { certificateSha256: pinA }, r2: { certificateSha256: pinB }, old: {} } };
+  assert.match(
+    pinMismatchHint(`ABB RWS2 certificate pin mismatch: actual=${pinA}, expected=${pinB}`, pinRegistry),
+    /registered as r1;/
+  );
+  assert.match(
+    pinMismatchHint(`pin mismatch: actual=${"C".repeat(64)}, expected=${pinB}`, pinRegistry),
+    /matches no registered alias/
+  );
+  assert.equal(pinMismatchHint("connect ETIMEDOUT", pinRegistry), null);
   console.log("tool-shaping ok");
 } finally {
   await rm(staging, { recursive: true, force: true });

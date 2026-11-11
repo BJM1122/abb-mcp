@@ -133,6 +133,7 @@ class FakeLegacyWorker {
 let legacyChangesetLoads = 0;
 const legacyRouter = new AbbBackendRouter({
   directService: new FakeDirectService(),
+  changesetBackend: "legacy",
   directChangesetLoader: async () => {
     legacyChangesetLoads += 1;
     throw new Error("legacy routing must not load direct changesets");

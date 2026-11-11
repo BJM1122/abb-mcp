@@ -10,9 +10,9 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const expectedChangesetBackend =
-  process.env.ABB_MCP_CHANGESET_BACKEND === "direct-rws-preview"
-    ? "direct-rws-preview"
-    : "legacy-powershell";
+  process.env.ABB_MCP_CHANGESET_BACKEND === "legacy"
+    ? "legacy-powershell"
+    : "direct-rws-preview";
 const childEnvironment = getDefaultEnvironment();
 for (const name of [
   "ABB_MCP_ALLOW_LEGACY",

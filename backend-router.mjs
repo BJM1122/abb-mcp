@@ -17,7 +17,9 @@ const CHANGESET_BACKENDS = new Set([
 ]);
 
 function normalizeChangesetBackend(value) {
-  const backend = String(value ?? CHANGESET_BACKEND_LEGACY).trim();
+  // Direct RWS is the default: it covers RWS1 and RWS2 (OmniCore), while the
+  // legacy PowerShell worker only speaks RWS1. Legacy stays opt-in.
+  const backend = String(value ?? CHANGESET_BACKEND_DIRECT_PREVIEW).trim();
   if (!CHANGESET_BACKENDS.has(backend)) {
     throw new Error(
       "Invalid ABB_MCP_CHANGESET_BACKEND. Expected 'legacy' or " +
@@ -45,7 +47,7 @@ export class AbbBackendRouter {
     maxSockets,
     legacyWorker,
     allowLegacy = true,
-    changesetBackend = CHANGESET_BACKEND_LEGACY,
+    changesetBackend = CHANGESET_BACKEND_DIRECT_PREVIEW,
     directService = null,
     directChangesetFactory = null,
     directChangesetLoader = () => import("./direct-rws/changeset-stack.mjs"),

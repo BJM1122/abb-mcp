@@ -23,6 +23,21 @@ export const DEFAULT_SAFETY = Object.freeze({
   allowedControllerStates: ["guardstop", "motoroff"]
 });
 
+// Cabinets often share one IP, so a pin mismatch usually means another
+// registered cabinet is plugged in. Name it from the local registry only.
+export function pinMismatchHint(message, registry) {
+  const match = /pin mismatch: actual=([0-9A-F]{64})/i.exec(String(message));
+  if (!match) return null;
+  const actual = match[1].toUpperCase();
+  const aliases = Object.entries(registry?.controllers ?? {})
+    .filter(([, config]) => String(config?.certificateSha256 ?? "").toUpperCase() === actual)
+    .map(([alias]) => alias);
+  return aliases.length > 0
+    ? `The connected controller's certificate is registered as ${aliases.join(", ")}; ` +
+        "use that alias if it is the cabinet you intend to work on."
+    : "The connected controller's certificate matches no registered alias.";
+}
+
 export function stripDiagnostics(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return result;
   const output = { ...result };

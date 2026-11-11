@@ -244,7 +244,8 @@ function changeset(controller = "robot2") {
   return { controller, operations: [] };
 }
 
-assert.equal(normalizeChangesetBackend(undefined), "legacy");
+assert.equal(normalizeChangesetBackend(undefined), "direct-rws-preview");
+assert.equal(normalizeChangesetBackend("legacy"), "legacy");
 assert.equal(
   normalizeChangesetBackend("direct-rws-preview"),
   "direct-rws-preview"
@@ -261,13 +262,28 @@ assert.throws(
   /ABB_MCP_CHANGESET_BACKEND/
 );
 
-// Legacy remains lazy and is still the default changeset route.
+// Direct RWS is the default changeset route; health never starts legacy.
+{
+  const router = new AbbBackendRouter({
+    directService: new FakeDirectService(),
+    legacyWorkerFactory() {
+      throw new Error("default route must not start legacy");
+    }
+  });
+  const health = await router.health();
+  assert.equal(health.backends.changeset, "direct-rws-preview");
+  assert.equal(health.legacy.started, false);
+  await router.close();
+}
+
+// Legacy stays available when selected explicitly, and stays lazy.
 {
   const direct = new FakeDirectService();
   let legacyCreated = 0;
   let legacy;
   const router = new AbbBackendRouter({
     directService: direct,
+    changesetBackend: "legacy",
     legacyWorker: { mock: true },
     legacyWorkerFactory() {
       legacyCreated += 1;

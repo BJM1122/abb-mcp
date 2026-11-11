@@ -1,6 +1,6 @@
 # ABB MCP
 
-用于 Windows 的本地 ABB Robot Web Services MCP 服务和 `abbctl` 命令行工具。支持 Claude Code、Codex 和兼容 stdio MCP 的客户端。公开发行版 **1.7.0**，新增 RAPID 批量搜索、模板模块生成，并修复 RW7/OmniCore 备份兼容性。
+用于 Windows 的本地 ABB Robot Web Services MCP 服务和 `abbctl` 命令行工具。支持 Claude Code、Codex 和兼容 stdio MCP 的客户端。公开发行版 **1.8.0**：changeset 默认改走 Node.js 直连 RWS（不再默认启动 PowerShell），计划阶段拒绝无法作为文件加载的 RAPID 源码，RW7 快照读取 PROFINET 网络，证书指纹不符时提示实际对应的本地别名。
 
 **完整功能版：提供 22 个 MCP 工具、CLI、Node.js 直连读写/备份、legacy PowerShell 后端和可选 PC SDK helper。** 不包含作者的控制器登记、密码、证书指纹、机器人程序、备份、现场数据或原私有仓库历史。示例地址 `192.0.2.x` 仅用于文档，不能直接连接机器人。
 
@@ -58,7 +58,7 @@ args = ['C:\ABB_MCP\server.mjs']
 env = { ABB_MCP_CHANGESET_BACKEND = "direct-rws-preview", ABB_MCP_ALLOW_LEGACY = "0" }
 ```
 
-若客户端找不到 `node`，将 `command` 换成 `Get-Command node` 返回的绝对路径。参考 [Codex 官方 MCP 文档](https://developers.openai.com/codex/mcp)。重新打开客户端/建立新会话，调用 `abb_health`，确认 `version: 1.7.0`、`diskVersion: 1.7.0`、`restartRequired: false`，以及 `read/backup: direct-rws`、`changeset: direct-rws-preview`。配置列表能显示服务不等于运行连接已经成功。
+若客户端找不到 `node`，将 `command` 换成 `Get-Command node` 返回的绝对路径。参考 [Codex 官方 MCP 文档](https://developers.openai.com/codex/mcp)。重新打开客户端/建立新会话，调用 `abb_health`，确认 `version: 1.8.0`、`diskVersion: 1.8.0`、`restartRequired: false`，以及 `read/backup: direct-rws`、`changeset: direct-rws-preview`。配置列表能显示服务不等于运行连接已经成功。
 
 ### DeepSeek
 
@@ -94,7 +94,7 @@ env = { ABB_MCP_CHANGESET_BACKEND = "direct-rws-preview", ABB_MCP_ALLOW_LEGACY =
 }
 ```
 
-这些环境变量明确选择直连后端；源代码为兼容旧用法仍默认 legacy。CLI 使用直连时先在当前 PowerShell 会话设置：
+从 1.8.0 起源代码默认就是直连 changeset 后端，这些环境变量只是把选择写明；`ABB_MCP_ALLOW_LEGACY=0` 额外禁止误用 legacy。CLI 也可以在当前 PowerShell 会话显式设置：
 
 ```powershell
 $env:ABB_MCP_CHANGESET_BACKEND = 'direct-rws-preview'
@@ -133,7 +133,11 @@ node .\abbctl.mjs controllers
 
 RW6/RWS1 备份使用 `$SYSPAR`，RW7/RWS2 使用 `$BACKUP`；RWS2 目录和文件请求分别使用对应的 Accept 类型，并识别 HTTP 201 的备份完成状态。备份仍要求停止 RAPID 和 guardstop/motoroff，保留防覆盖、单次审批和独立验证。
 
-工具接口一致不代表所有柜都支持同一操作：RWS 版本、控制器选项、账号权限和现场状态仍决定可用能力。RWS2 的离线 Mock 验证不代表所有 OmniCore 现场写入均已验证。
+`rapid_module_put/replace` 在生成计划时检查模块源码：出现空参数（`,;`、`,)`、`,,`、`(,`，注释和字符串内的不算）即拒绝出计划，并给出行号、列号和原文。控制器内存中的模块文本可能照常编译，但作为文件加载时会失败，导致整个任务编译不过。`<SMT>` 之类占位符不拦截。
+
+`abb_controller_snapshot` 在 RWS2/RobotWare 7 上读取 `PROFINET_NETWORK`（RW7 没有 `INDUSTRIAL_NETWORK` 类型），结果新增 `IndustrialNetworkType`；网络类型不存在时快照其余部分照常返回，并附 `IndustrialNetworkError`。RWS2 证书指纹不符时，错误信息会附上本地 registry 中与实际指纹相同的别名（多台柜共用同一地址、接错柜时可直接看出接的是哪台）；只在本地比对，不额外发请求。
+
+工具接口一致不代表所有柜都支持同一操作：RWS 版本、控制器选项、账号权限和现场状态仍决定可用能力。direct 后端已在一台 OmniCore（RobotWare 7.20）上完成 RAPID 模块替换并独立读回；配置写入尚未在 OmniCore 实机执行，其余 RWS2 写入路径为离线 Mock 验证。
 
 ## 审批与运行边界
 
@@ -146,7 +150,7 @@ RW6/RWS1 备份使用 `$SYSPAR`，RW7/RWS2 使用 `$BACKUP`；RWS2 目录和文�
 
 ## 可选后端（没有删减）
 
-**legacy PowerShell changeset**：通用 RWS transport 已包含在 `legacy/abb_rws_session.ps1`。在客户端 env 中改为 `ABB_MCP_CHANGESET_BACKEND=legacy`、`ABB_MCP_ALLOW_LEGACY=1`，必要时设置 `ABB_MCP_PWSH` 为自己机器的 PowerShell 7 绝对路径。保留本地 registry 的 `rwsHelperPath`。legacy 的协议/Unicode 能力与直连后端不同，不会在直连失败后静默切换。
+**legacy PowerShell changeset**：通用 RWS transport 已包含在 `legacy/abb_rws_session.ps1`。在客户端 env 中改为 `ABB_MCP_CHANGESET_BACKEND=legacy`、`ABB_MCP_ALLOW_LEGACY=1`，必要时设置 `ABB_MCP_PWSH` 为自己机器的 PowerShell 7 绝对路径。保留本地 registry 的 `rwsHelperPath`。legacy 只支持 RWS1，仅在需要它独有的 `cfg_file_load` `add-with-reset` 时选择；其协议/Unicode 能力与直连后端不同，不会在直连失败后静默切换。
 
 **PC SDK helper**：源码全部包含，原工具中它是可选独立 helper，并非默认 MCP 路由。需自行安装 ABB RobotStudio/PC SDK 及所需授权选项，仓库不分发 ABB 专有程序集：
 

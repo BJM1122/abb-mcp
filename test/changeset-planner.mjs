@@ -16,6 +16,7 @@ import {
   assertNoOperationConflicts,
   configAttributesSha256,
   configInventorySha256,
+  rapidSourceProblems,
   sha256Text
 } from "../direct-rws/changeset-planner.mjs";
 
@@ -837,6 +838,29 @@ try {
   assert.equal(longPlan.Operations[0].SourceDiff.Truncated, true);
   assert.equal(longPlan.Operations[0].SourceDiff.After.split("\n").length, 100);
   assert.equal(planner.consume(longPlan.Token).Operations[0].ArtifactBytes.toString("utf8"), longModule);
+
+  // Live text such as `WaitTime 0.5,;` builds in memory but fails to load as a file.
+  const unloadable = [
+    "MODULE PutModule",
+    "  ! a comment with a,; is ignored",
+    '  CONST string s := "text ,; in a string";',
+    "  PROC p()",
+    "    WaitTime 0.5,;",
+    "    MoveL Offs(p1,0,,0), v100, fine, tool0;",
+    "  ENDPROC",
+    "ENDMODULE"
+  ].join("\r\n");
+  assert.deepEqual(
+    rapidSourceProblems(unloadable).map((item) => [item.Line, item.Column]),
+    [[5, 17], [6, 20]]
+  );
+  assert.deepEqual(rapidSourceProblems(longModule), []);
+  await writeFile(putModulePath, unloadable);
+  await assert.rejects(
+    planner.prepare(baseChangeset([{ kind: "rapid_module_put",
+      task: "T_ROB1", module: "PutModule", localPath: putModulePath }])),
+    /would fail to load as a file.*line 5 col 17 empty argument: WaitTime 0\.5,;/
+  );
 
   console.log(
     JSON.stringify(
