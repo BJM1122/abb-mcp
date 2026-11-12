@@ -15,7 +15,12 @@ const DIAGNOSTIC_KEYS = [
   "Session",
   "IdentityCacheHit",
   "IdentityAgeMs",
-  "RegistryReloaded"
+  "RegistryReloaded",
+  "QueueWaitMs",
+  "HttpElapsedMs",
+  "TimeoutDelta",
+  "PhaseTimingsMs",
+  "TotalElapsedMs"
 ];
 
 export const DEFAULT_SAFETY = Object.freeze({
@@ -61,6 +66,28 @@ export function findRoutine(lines, routine) {
     throw new Error(`Routine ${routine} has no END line.`);
   }
   throw new Error(`Routine ${routine} not found in module.`);
+}
+
+// Every PROC/FUNC/TRAP with 1-based bounds; end is null when no END line is
+// found before the next routine.
+export function listRoutines(lines) {
+  const routines = [];
+  let open = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = ROUTINE_START.exec(`${lines[index]} `);
+    if (match) {
+      open = { name: match[1], start: index + 1, end: null };
+      routines.push(open);
+    } else if (open && ROUTINE_END.test(lines[index])) {
+      open.end = index + 1;
+      open = null;
+    }
+  }
+  return routines;
+}
+
+function routineLabel(routine) {
+  return `${routine.name}:${routine.start}${routine.end ? `-${routine.end}` : ""}`;
 }
 
 export function moduleExtension(source) {
@@ -139,11 +166,14 @@ export async function shapeModuleRead(result, view, stagingDir) {
 
 // modules: [{ Alias, Task, Module, Text, SourceSha256 }] read in one batch.
 // view: { pattern?, context?, maxMatches?, outline?, saveToFile? }
-// Outline lists each module's routines; Matches holds pattern hits (case-insensitive).
+// Outline lists each module's routines (Name:start-end); Matches holds pattern
+// hits (case-insensitive), each tagged with its enclosing routine. A pattern
+// search lists only the modules that hit unless outline=true asks for all.
 export async function shapeModuleSearch(modules, view, stagingDir) {
   const regex = view.pattern ? new RegExp(view.pattern, "i") : null;
   const context = view.context ?? 0;
   const maxMatches = view.maxMatches ?? 200;
+  const withRoutines = view.outline ?? !regex;
   const outline = [];
   const matches = [];
   let matchCount = 0;
@@ -151,13 +181,9 @@ export async function shapeModuleSearch(modules, view, stagingDir) {
     const text = String(module.Text ?? "");
     const lines = text.split(/\r?\n/);
     if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+    const routines = listRoutines(lines);
     const entry = { Module: module.Module, SourceSha256: module.SourceSha256, LineCount: lines.length };
-    if (view.outline !== false) {
-      entry.Routines = lines
-        .map((line, index) => [ROUTINE_START.exec(`${line} `), index + 1])
-        .filter(([match]) => match)
-        .map(([match, line]) => `${match[1]}:${line}`);
-    }
+    if (withRoutines) entry.Routines = routines.map(routineLabel);
     if (view.saveToFile !== false) {
       const file = contentFile(
         path.join(stagingDir, "modules", safeSegment(module.Alias), safeSegment(module.Task)),
@@ -167,13 +193,21 @@ export async function shapeModuleSearch(modules, view, stagingDir) {
       entry.LocalPath = file;
       if (await writeUnlessPresent(file, text)) entry.LocalEdited = true;
     }
-    outline.push(entry);
-    if (!regex) continue;
+    if (!regex) {
+      outline.push(entry);
+      continue;
+    }
+    let moduleHits = 0;
     for (let index = 0; index < lines.length; index += 1) {
       if (!regex.test(lines[index])) continue;
       matchCount += 1;
+      moduleHits += 1;
       if (matches.length >= maxMatches) continue;
       const hit = { Module: module.Module, Line: index + 1, Text: lines[index].trim() };
+      const routine = routines.find(
+        (item) => item.start <= index + 1 && index + 1 <= (item.end ?? item.start)
+      );
+      if (routine) hit.Routine = routineLabel(routine);
       if (context > 0) {
         const start = Math.max(0, index - context);
         hit.Context = lines.slice(start, Math.min(lines.length, index + context + 1)).join("\n");
@@ -181,6 +215,7 @@ export async function shapeModuleSearch(modules, view, stagingDir) {
       }
       matches.push(hit);
     }
+    if (moduleHits > 0 || withRoutines) outline.push(entry);
   }
   const output = { ModuleCount: modules.length, Modules: outline };
   if (regex) {
@@ -189,6 +224,50 @@ export async function shapeModuleSearch(modules, view, stagingDir) {
     if (matchCount > matches.length) output.Truncated = true;
   }
   return output;
+}
+
+// Reads every module of one task through call(method, args, timeoutMs).
+// Repeated searches/derivations reuse module text for a short time instead of
+// re-reading the whole task. The module list is always read live, the caller
+// clears the cache after any apply, and a plan re-reads the online module
+// before a write, so a stale entry can cost a wrong search hit but never a
+// wrong write.
+export function createTaskModuleReader(call, { ttlMs = 30_000, concurrency = 4, now = Date.now } = {}) {
+  const cache = new Map();
+  // freshNames: modules that must come from the controller; true means all.
+  async function read(alias, task, filter, freshNames = []) {
+    const listed = await call("list_modules", { alias, task }, 60_000);
+    const resolvedTask = listed.Task ?? task;
+    const names = (listed.Modules ?? [])
+      .map((item) => item.Name)
+      .filter((name) => !filter || filter.test(name))
+      .sort();
+    for (const [key, entry] of cache) {
+      if (now() - entry.at > ttlMs) cache.delete(key);
+    }
+    const fresh = freshNames === true ? null : new Set(freshNames.map((name) => name.toLowerCase()));
+    const modules = new Array(names.length);
+    let cached = 0;
+    let next = 0;
+    const readNext = async () => {
+      while (next < names.length) {
+        const index = next++;
+        const key = `${alias}\0${resolvedTask}\0${names[index]}`;
+        const hit = !fresh || fresh.has(names[index].toLowerCase()) ? null : cache.get(key);
+        if (hit) {
+          modules[index] = hit.module;
+          cached += 1;
+          continue;
+        }
+        const result = await call("read_module", { alias, task: resolvedTask, module: names[index] }, 90_000);
+        modules[index] = { ...result, Alias: result.Alias ?? alias, Task: result.Task ?? resolvedTask };
+        cache.set(key, { at: now(), module: modules[index] });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, names.length) }, readNext));
+    return { task: resolvedTask, modules, cached };
+  }
+  return { read, clear: () => cache.clear() };
 }
 
 // Derived source lands under staging/derived so the planner accepts its localPath.

@@ -11,6 +11,7 @@ import {
 } from "./backend-router.mjs";
 import { singleFlightKey } from "./canonical-json.mjs";
 import {
+  createTaskModuleReader,
   expandChangeset,
   pinMismatchHint,
   shapeConfigList,
@@ -26,7 +27,7 @@ const registryPath = process.env.ABB_MCP_REGISTRY || path.join(here, "controller
 // Inline RAPID sources and saved module reads land here; it must sit inside a
 // registry allowedLocalRoots entry so the planners accept the files.
 const stagingDir = process.env.ABB_MCP_STAGING_DIR || path.join(here, "artifacts", "staging");
-// Session metrics/timings stay out of read results unless explicitly requested.
+// Session metrics/timings stay out of tool results unless explicitly requested.
 const includeDiagnostics = process.env.ABB_MCP_DIAGNOSTICS === "1";
 const changesetBackend = normalizeChangesetBackend(
   process.env.ABB_MCP_CHANGESET_BACKEND
@@ -372,15 +373,11 @@ function formatWorkerProgress(method, event) {
 }
 
 // shape.prepare(args) -> { args: backendArgs, view }; shape.present(result, view).
-// Read results drop session diagnostics unless ABB_MCP_DIAGNOSTICS=1.
+// Results drop session counters and timings unless ABB_MCP_DIAGNOSTICS=1.
 function registerWorkerTool(name, definition, method, timeoutMs = 60_000, shape = {}) {
   const present = async (result, view) => {
     const shaped = shape.present ? await shape.present(result, view) : result;
-    return toolResult(
-      SINGLE_FLIGHT_READ_METHODS.has(method) && !includeDiagnostics
-        ? stripDiagnostics(shaped)
-        : shaped
-    );
+    return toolResult(includeDiagnostics ? shaped : stripDiagnostics(shaped));
   };
   server.registerTool(name, definition, async (toolArgs, extra) => {
     try {
@@ -403,7 +400,12 @@ function registerWorkerTool(name, definition, method, timeoutMs = 60_000, shape 
       };
       const invoke = async () => {
         const readyWorker = await ensureWorkerReady();
-        return readyWorker.call(method, args, timeoutMs, queueWaitMs, reportProgress);
+        try {
+          return await readyWorker.call(method, args, timeoutMs, queueWaitMs, reportProgress);
+        } finally {
+          // Whatever the outcome, cached module text may no longer match.
+          if (method === "commit_job" || method === "disconnect") taskModules.clear();
+        }
       };
       if (!SINGLE_FLIGHT_READ_METHODS.has(method)) return await present(await invoke(), view);
 
@@ -617,41 +619,18 @@ registerWorkerTool(
 
 // One call instead of list + N reads + local grep: the worker reads modules
 // with bounded concurrency on the shared session, shaping saves and searches them.
-const SEARCH_READ_CONCURRENCY = 4;
-async function readTaskModules(alias, task, filter) {
+const taskModules = createTaskModuleReader(async (method, args, timeoutMs) => {
   const readyWorker = await ensureWorkerReady();
-  const listed = await readyWorker.call("list_modules", { alias, task }, 60_000, queueWaitMs);
-  const resolvedTask = listed.Task ?? task;
-  const names = (listed.Modules ?? [])
-    .map((item) => item.Name)
-    .filter((name) => !filter || filter.test(name))
-    .sort();
-  const modules = new Array(names.length);
-  let next = 0;
-  const readNext = async () => {
-    while (next < names.length) {
-      const index = next++;
-      const read = await readyWorker.call(
-        "read_module",
-        { alias, task: resolvedTask, module: names[index] },
-        90_000,
-        queueWaitMs
-      );
-      modules[index] = { ...read, Alias: read.Alias ?? alias, Task: read.Task ?? resolvedTask };
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(SEARCH_READ_CONCURRENCY, names.length) }, readNext)
-  );
-  return { task: resolvedTask, modules };
-}
+  return readyWorker.call(method, args, timeoutMs, queueWaitMs);
+});
+const readTaskModules = taskModules.read;
 
 server.registerTool(
   "abb_search_rapid",
   {
     title: "Search ABB RAPID modules",
     description:
-      "Read only: read every loaded module of one task (or those matching moduleFilter) in one call, save each to a local file (LocalPath, create-only like saveToFile), and return each module's routines (Name:line) plus case-insensitive regex pattern hits with optional context lines. Use it first to locate code by routine, signal or point name; then read only the hit with abb_read_rapid_module routine/startLine.",
+      "Read only: search every loaded module of one task (or those matching moduleFilter) in one call. With pattern (case-insensitive regex): returns Matches (Module, Line, Text, enclosing Routine as Name:start-end, optional context) and lists only the modules that hit. Without pattern, or with outline=true: every module's routines as Name:start-end. Each listed module is saved to LocalPath (create-only; LocalEdited=true means that file already differs from the online source). To read more code around a hit, open LocalPath at those lines instead of calling the controller again. Module text is reused for up to 30 seconds across calls (CachedModules counts reused modules); pass refresh=true after an edit on the pendant.",
     inputSchema: {
       alias: controllerAliasSchema,
       task: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/).optional(),
@@ -660,21 +639,32 @@ server.registerTool(
       context: z.number().int().min(0).max(10).optional(),
       maxMatches: z.number().int().min(1).max(2_000).optional(),
       outline: z.boolean().optional(),
-      saveToFile: z.boolean().optional()
+      saveToFile: z.boolean().optional(),
+      refresh: z.boolean().optional()
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
   },
-  async ({ alias, task, pattern, moduleFilter, context, maxMatches, outline, saveToFile }) => {
+  async ({ alias, task, pattern, moduleFilter, context, maxMatches, outline, saveToFile, refresh }) => {
     try {
       if (pattern) new RegExp(pattern, "i");
       const filter = moduleFilter ? new RegExp(moduleFilter, "i") : null;
-      const { task: resolvedTask, modules } = await readTaskModules(alias, task, filter);
+      const { task: resolvedTask, modules, cached } = await readTaskModules(
+        alias,
+        task,
+        filter,
+        refresh === true ? true : []
+      );
       const shaped = await shapeModuleSearch(
         modules,
         { pattern, context, maxMatches, outline, saveToFile },
         stagingDir
       );
-      return toolResult({ Alias: alias, Task: resolvedTask, ...shaped });
+      return toolResult({
+        Alias: alias,
+        Task: resolvedTask,
+        ...(cached > 0 ? { CachedModules: cached } : {}),
+        ...shaped
+      });
     } catch (error) {
       return toolError(error);
     }
@@ -702,7 +692,8 @@ server.registerTool(
   },
   async ({ alias, task, template, target, pointNames, templateTag, targetTag, keepUnused, keepTargetValues }) => {
     try {
-      const { task: resolvedTask, modules } = await readTaskModules(alias, task, null);
+      // Template and target values end up in the derived source: read them live.
+      const { task: resolvedTask, modules } = await readTaskModules(alias, task, null, [template, target]);
       const find = (name) => modules.find((item) => item.Module.toLowerCase() === name.toLowerCase());
       const templateModule = find(template);
       if (!templateModule) throw new Error(`Template module ${template} is not loaded in ${resolvedTask}.`);

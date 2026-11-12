@@ -9,6 +9,7 @@ import {
   pinMismatchHint,
   shapeConfigList,
   shapeModuleRead,
+  createTaskModuleReader,
   shapeModuleSearch,
   stripDiagnostics
 } from "../tool-shaping.mjs";
@@ -171,23 +172,71 @@ try {
     staging
   );
   assert.equal(searched.ModuleCount, 2);
-  assert.deepEqual(searched.Modules[0].Routines, ["main:3", "Pick:6", "Twice:9", "OnErr:12"]);
-  assert.deepEqual(searched.Modules[1].Routines, ["x:2"]);
+  assert.equal(searched.Modules.length, 2, "both modules hit");
+  assert.equal(searched.Modules[0].Routines, undefined, "a pattern search skips the outline by default");
   assert.equal(searched.MatchCount, 2, "pattern is case-insensitive");
   assert.equal(searched.Matches.length, 1);
   assert.equal(searched.Truncated, true);
   assert.deepEqual(
-    { Module: searched.Matches[0].Module, Line: searched.Matches[0].Line, ContextStart: searched.Matches[0].ContextStart },
-    { Module: "MainModule", Line: 7, ContextStart: 6 }
+    {
+      Module: searched.Matches[0].Module,
+      Line: searched.Matches[0].Line,
+      ContextStart: searched.Matches[0].ContextStart,
+      Routine: searched.Matches[0].Routine
+    },
+    { Module: "MainModule", Line: 7, ContextStart: 6, Routine: "Pick:6-8" }
   );
   assert.equal(await readFile(searched.Modules[1].LocalPath, "utf8"), "MODULE Other\nPROC x()\n  WAITTIME 2;\nENDPROC\nENDMODULE\n");
+  const searchModules = [
+    { Alias: "r", Task: "T", Module: "MainModule", SourceSha256: "a", Text: source },
+    { Alias: "r", Task: "T", Module: "Other", SourceSha256: "b", Text: "MODULE Other\nPROC x()\n  Stop;\nENDMODULE\n" }
+  ];
+  const oneHit = await shapeModuleSearch(searchModules, { pattern: "RETURN" }, staging);
+  assert.deepEqual(oneHit.Modules.map((item) => item.Module), ["MainModule"], "modules without a hit are not listed");
+  assert.equal(oneHit.ModuleCount, 2, "ModuleCount still counts every searched module");
+  assert.equal(oneHit.Matches[0].Routine, "Twice:9-11");
+  const outlined = await shapeModuleSearch(searchModules, { pattern: "RETURN", outline: true }, staging);
+  assert.deepEqual(outlined.Modules[0].Routines, ["main:3-5", "Pick:6-8", "Twice:9-11", "OnErr:12-13"]);
+  assert.deepEqual(outlined.Modules[1].Routines, ["x:2"], "a routine without an END line has no end");
   const outlineOnly = await shapeModuleSearch(
     [{ Alias: "r", Task: "T", Module: "Other", Text: "MODULE Other\nENDMODULE" }],
     { saveToFile: false },
     staging
   );
   assert.equal(outlineOnly.Matches, undefined);
+  assert.deepEqual(outlineOnly.Modules[0].Routines, [], "no pattern keeps the outline");
   assert.equal(outlineOnly.Modules[0].LocalPath, undefined);
+
+  let clock = 0;
+  const calls = [];
+  const reader = createTaskModuleReader(
+    async (method, args) => {
+      calls.push(`${method}:${args.module ?? ""}`);
+      return method === "list_modules"
+        ? { Task: "T", Modules: [{ Name: "B" }, { Name: "A" }] }
+        : { Module: args.module, Text: `MODULE ${args.module}\nENDMODULE`, SourceSha256: args.module };
+    },
+    { ttlMs: 30_000, now: () => clock }
+  );
+  const first = await reader.read("r", undefined, null);
+  assert.deepEqual(first.modules.map((item) => item.Module), ["A", "B"]);
+  assert.deepEqual([first.task, first.cached, first.modules[0].Alias, first.modules[0].Task], ["T", 0, "r", "T"]);
+  calls.length = 0;
+  assert.equal((await reader.read("r", undefined, null)).cached, 2);
+  assert.deepEqual(calls, ["list_modules:"], "a repeat only lists modules");
+  calls.length = 0;
+  assert.equal((await reader.read("r", undefined, null, ["a"])).cached, 1);
+  assert.deepEqual(calls, ["list_modules:", "read_module:A"], "named modules are always read live");
+  assert.equal((await reader.read("r", undefined, null, true)).cached, 0, "refresh bypasses the cache");
+  assert.equal((await reader.read("other", undefined, null)).cached, 0, "another alias shares nothing");
+  clock = 30_001;
+  assert.equal((await reader.read("r", undefined, null)).cached, 0, "entries expire");
+  reader.clear();
+  assert.equal((await reader.read("r", undefined, null)).cached, 0, "clear drops everything");
+  assert.deepEqual(
+    stripDiagnostics({ Applied: true, Verified: true, PhaseTimingsMs: {}, TotalElapsedMs: 1, TimeoutDelta: 0, QueueWaitMs: 0, HttpElapsedMs: 0 }),
+    { Applied: true, Verified: true }
+  );
   const pinA = "A".repeat(64);
   const pinB = "B".repeat(64);
   const pinRegistry = { controllers: { r1: { certificateSha256: pinA }, r2: { certificateSha256: pinB }, old: {} } };

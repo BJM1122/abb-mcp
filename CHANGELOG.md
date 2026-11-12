@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `abb_search_rapid` and `abb_derive_module` reuse module text for up to 30 seconds instead of re-reading the whole task on every call. The module list is always read live, any apply or disconnect clears the cache, and `abb_derive_module` always reads its template and target live. `abb_search_rapid` reports `CachedModules` and accepts `refresh=true` to force live reads.
+- `abb_search_rapid` results are shorter and point at the local copies: routines are listed as `Name:start-end`, each match names its enclosing routine, and a pattern search lists only the modules that hit (pass `outline=true` for every module's routines). The routine format changed from `Name:line`.
+- Plan, apply, verify and backup results no longer carry session counters and timings (`Metrics`, `PhaseTimingsMs`, `TotalElapsedMs` and similar) unless `ABB_MCP_DIAGNOSTICS=1`; read results also drop `QueueWaitMs` and `HttpElapsedMs`. Approval tokens, identity, state, diffs and verification evidence are unchanged.
+
+Covered by offline tests only; not yet measured on a controller.
+
 ## 1.8.0 — 2026-11-10
 
 - Changesets now default to the direct Node.js RWS backend (`direct-rws-preview`, RWS1 and RWS2) and no longer start PowerShell by default. The legacy PowerShell worker supports RWS1 only and stays available with an explicit `ABB_MCP_CHANGESET_BACKEND=legacy`, mainly for its `cfg_file_load` `add-with-reset` mode. Direct failures never fall back to legacy silently.

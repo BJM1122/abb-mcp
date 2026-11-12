@@ -129,7 +129,7 @@ node .\abbctl.mjs controllers
 
 模块读取支持按例程/行号摘录及保存；配置列表支持字段筛选和数量限制。配置、PROFINET、信号、RAPID 模块更新/移除、build 和可选 restart 使用 [changeset.schema.json](changeset.schema.json)，示例见 [examples](examples/)。CLI `batch` 可复用同一传输和 RWS 会话。
 
-`abb_search_rapid` 批量读取一个任务的模块，返回例程目录、正则匹配及可选上下文；默认保存模块到本地 staging。`abb_derive_module` 在本地按模板生成目标模块，默认复制模板数值，`keepTargetValues=true` 可保留目标已有数值，并报告名称冲突、引用问题和数值变化。生成结果仍须通过 `abb_plan_changeset` 审查并批准后才能写入控制器。
+`abb_search_rapid` 批量读取一个任务的模块，返回正则匹配（含所在例程的起止行）及可选上下文；带 `pattern` 时只列出命中的模块，不带或 `outline=true` 时返回全部模块的例程目录。默认保存模块到本地 staging，查看命中附近的代码直接打开 `LocalPath` 即可。模块文本在 30 秒内重复使用（`CachedModules` 为复用数量，写入或断开后清空），示教器上刚改过时传 `refresh=true`。`abb_derive_module` 在本地按模板生成目标模块，默认复制模板数值，`keepTargetValues=true` 可保留目标已有数值，并报告名称冲突、引用问题和数值变化。生成结果仍须通过 `abb_plan_changeset` 审查并批准后才能写入控制器。
 
 RW6/RWS1 备份使用 `$SYSPAR`，RW7/RWS2 使用 `$BACKUP`；RWS2 目录和文件请求分别使用对应的 Accept 类型，并识别 HTTP 201 的备份完成状态。备份仍要求停止 RAPID 和 guardstop/motoroff，保留防覆盖、单次审批和独立验证。
 
