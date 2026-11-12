@@ -1,6 +1,6 @@
 # ABB MCP
 
-用于 Windows 的本地 ABB Robot Web Services MCP 服务和 `abbctl` 命令行工具。支持 Claude Code、Codex 和兼容 stdio MCP 的客户端。公开发行版 **1.8.0**：changeset 默认改走 Node.js 直连 RWS（不再默认启动 PowerShell），计划阶段拒绝无法作为文件加载的 RAPID 源码，RW7 快照读取 PROFINET 网络，证书指纹不符时提示实际对应的本地别名。
+用于 Windows 的本地 ABB Robot Web Services MCP 服务和 `abbctl` 命令行工具。支持 Claude Code、Codex 和兼容 stdio MCP 的客户端。公开发行版 **1.8.1**：RAPID 搜索和模块派生在 30 秒内复用模块文本，搜索结果标出命中所在的例程并只列命中的模块，写入和备份结果不再附带会话计数和耗时。自 1.8.0 起 changeset 默认走 Node.js 直连 RWS（不再默认启动 PowerShell），计划阶段拒绝无法作为文件加载的 RAPID 源码。
 
 **完整功能版：提供 22 个 MCP 工具、CLI、Node.js 直连读写/备份、legacy PowerShell 后端和可选 PC SDK helper。** 不包含作者的控制器登记、密码、证书指纹、机器人程序、备份、现场数据或原私有仓库历史。示例地址 `192.0.2.x` 仅用于文档，不能直接连接机器人。
 
@@ -58,7 +58,7 @@ args = ['C:\ABB_MCP\server.mjs']
 env = { ABB_MCP_CHANGESET_BACKEND = "direct-rws-preview", ABB_MCP_ALLOW_LEGACY = "0" }
 ```
 
-若客户端找不到 `node`，将 `command` 换成 `Get-Command node` 返回的绝对路径。参考 [Codex 官方 MCP 文档](https://developers.openai.com/codex/mcp)。重新打开客户端/建立新会话，调用 `abb_health`，确认 `version: 1.8.0`、`diskVersion: 1.8.0`、`restartRequired: false`，以及 `read/backup: direct-rws`、`changeset: direct-rws-preview`。配置列表能显示服务不等于运行连接已经成功。
+若客户端找不到 `node`，将 `command` 换成 `Get-Command node` 返回的绝对路径。参考 [Codex 官方 MCP 文档](https://developers.openai.com/codex/mcp)。重新打开客户端/建立新会话，调用 `abb_health`，确认 `version: 1.8.1`、`diskVersion: 1.8.1`、`restartRequired: false`，以及 `read/backup: direct-rws`、`changeset: direct-rws-preview`。配置列表能显示服务不等于运行连接已经成功。
 
 ### DeepSeek
 

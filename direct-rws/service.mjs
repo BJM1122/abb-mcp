@@ -1421,7 +1421,7 @@ export class DirectRwsService {
     switch (method) {
       case "health": {
         await this.reloadRegistry();
-        const version = "1.8.0";
+        const version = "1.8.1";
         let diskVersion = null;
         let versionCheckError;
         try {

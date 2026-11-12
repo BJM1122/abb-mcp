@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.1 — 2026-11-12
 
 - `abb_search_rapid` and `abb_derive_module` reuse module text for up to 30 seconds instead of re-reading the whole task on every call. The module list is always read live, any apply or disconnect clears the cache, and `abb_derive_module` always reads its template and target live. `abb_search_rapid` reports `CachedModules` and accepts `refresh=true` to force live reads.
 - `abb_search_rapid` results are shorter and point at the local copies: routines are listed as `Name:start-end`, each match names its enclosing routine, and a pattern search lists only the modules that hit (pass `outline=true` for every module's routines). The routine format changed from `Name:line`.
